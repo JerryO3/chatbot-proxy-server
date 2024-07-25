@@ -54,7 +54,7 @@ async def route_ingested_list():
         if pair[1] not in doc_dict:
             doc_dict[pair[1]] = []
         doc_dict[pair[1]].append(pair[0])
-    return {"doc_list": doc_dict}
+    return {"file_list": doc_dict}
 
 @app.post("/submit-query/")
 async def route_query(query: Query):
@@ -116,6 +116,8 @@ async def create_upload_file(file: UploadFile):
         os.rename(tmp1.name,file_name)
         add_file("./" + file_name)
         os.remove(file_name)
+    
+    return {"upload_status": "successful"}
 
 def add_file(fp):
     file = {'file': open(fp, 'rb')}
