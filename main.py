@@ -19,6 +19,10 @@ app = FastAPI()
 
 server = "http://localhost:8001"
 
+
+'''
+Controls which servers can access the router.
+'''
 origins = [
     "http://localhost:5173",
 ]
@@ -31,15 +35,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+'''
+Query represents the expected json object structure
+sent by the client during query submission.
+'''
 class Query(BaseModel):
     prompt: str
     stream: bool
     use_context: bool
     include_sources: bool
 
+'''
+Document represents the expected json object structure
+sent by the client during document deletion.
+'''
 class Document(BaseModel):
     doc_id: str
 
+'''
+Returns a response containing a dictionary of file names to an list 
+of their associated document ids. The server breaks down files into
+one or more documents during ingestion. 
+'''
 @app.get("/get-file-list/")
 async def route_ingested_list():
     get_docs = http.client.HTTPConnection('localhost:8001')
@@ -56,6 +73,13 @@ async def route_ingested_list():
         doc_dict[pair[1]].append(pair[0])
     return {"file_list": doc_dict}
 
+'''
+Given a query, sends a request for model response from the server.
+The response type is governed by the elements in Query.
+
+Returns a string response containing the response as well as 
+referenced sources, delimited by the section delimiter.
+'''
 @app.post("/submit-query/")
 async def route_query(query: Query):
     dct = {"prompt": query.prompt,
@@ -79,6 +103,9 @@ async def route_query(query: Query):
     else:
         print("something went wrong!")
 
+'''
+Helper function for route_query
+'''
 def response_parser(obj: dict):
     section_delimiter = "\n\n===========================================================\n\n"
     response = obj["choices"][0]["message"]["content"] + section_delimiter
@@ -88,11 +115,24 @@ def response_parser(obj: dict):
         response += data["text"]
     return response
 
+'''
+Given a document id, deletes the associated document from the server.
+
+Returns confirmation object that the document with the associated 
+document id has been deleted from the server.
+'''
 @app.post("/delete/")
 async def delete_file(doc: Document):
     requests.delete("http://localhost:8001/v1/ingest/" + doc.doc_id)
-    return doc.doc_id
+    return {"document deleted" : doc.doc_id}
 
+'''
+Given a file, uploads the file to the server. If the file is in pdf format,
+the file will be converted into the more parseable markdown format using
+pymu4pdfllm library. Consider adding other pre-processing to this function.
+
+Returns confirmation that the file has been uploaded is successful.
+'''
 @app.post("/upload-document/")
 async def create_upload_file(file: UploadFile):
     file_name = file.filename
@@ -119,6 +159,9 @@ async def create_upload_file(file: UploadFile):
     
     return {"upload_status": "successful"}
 
+'''
+Helper function for create_upload_file
+'''
 def add_file(fp):
     file = {'file': open(fp, 'rb')}
     response = requests.post('http://localhost:8001/v1/ingest/file', files=file)
