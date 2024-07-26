@@ -108,12 +108,14 @@ Helper function for route_query
 '''
 def response_parser(obj: dict):
     section_delimiter = "\n\n===========================================================\n\n"
-    response = obj["choices"][0]["message"]["content"] + section_delimiter
+    response = obj["choices"][0]["message"]["content"] 
     for data in obj["choices"][0]["sources"]:
+        response += section_delimiter
         response += data["document"]["doc_metadata"]["file_name"]
         response += section_delimiter
         response += data["text"]
     return response
+
 
 '''
 Given a document id, deletes the associated document from the server.
