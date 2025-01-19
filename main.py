@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-server = "http://localhost:8001"
+chat_server = 'localhost:8080'
 
 
 '''
@@ -25,6 +25,7 @@ Controls which servers can access the router.
 '''
 origins = [
     "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
 
 app.add_middleware(
@@ -59,7 +60,7 @@ one or more documents during ingestion.
 '''
 @app.get("/get-file-list/")
 async def route_ingested_list():
-    get_docs = http.client.HTTPConnection('localhost:8001')
+    get_docs = http.client.HTTPConnection(chat_server)
     get_docs.request("GET", "/v1/ingest/list")
     doc_ids = get_docs.getresponse()
     obj = json.loads(doc_ids.read())
@@ -88,7 +89,7 @@ async def route_query(query: Query):
         "include_sources": query.include_sources}
     
     json_string = json.dumps(dct)
-    h1 = http.client.HTTPConnection('localhost:8001')
+    h1 = http.client.HTTPConnection(chat_server)
     h1.request("POST", "/v1/completions", headers={"Content-Type": "application/json"}, body=json_string)
     response = h1.getresponse()
     
@@ -107,14 +108,13 @@ async def route_query(query: Query):
 Helper function for route_query
 '''
 def response_parser(obj: dict):
-    section_delimiter = "\n\n===========================================================\n\n"
     response = obj["choices"][0]["message"]["content"] 
+    out = {}
+    out['response'] = response
+    out['sources'] = {}
     for data in obj["choices"][0]["sources"]:
-        response += section_delimiter
-        response += data["document"]["doc_metadata"]["file_name"]
-        response += section_delimiter
-        response += data["text"]
-    return response
+        out['sources'][data["document"]["doc_metadata"]["file_name"]] = data["text"]
+    return out
 
 
 '''
@@ -125,8 +125,20 @@ document id has been deleted from the server.
 '''
 @app.post("/delete/")
 async def delete_file(doc: Document):
-    requests.delete("http://localhost:8001/v1/ingest/" + doc.doc_id)
-    return {"document deleted" : doc.doc_id}
+    conn = http.client.HTTPConnection(chat_server)
+    try:
+        endpoint = f"/v1/ingest/{doc.doc_id}"
+        conn.request("DELETE", endpoint)
+        response = conn.getresponse()
+
+        if response.status == 200:
+            return {"document deleted": doc.doc_id}
+        else:
+            return {"error": f"Failed to delete document: {response.status} {response.reason}"}
+    except Exception as e:
+        return {"error": f"An error occurred: {str(e)}"}
+    finally:
+        conn.close()
 
 '''
 Given a file, uploads the file to the server. If the file is in pdf format,
@@ -143,28 +155,43 @@ async def create_upload_file(file: UploadFile):
     tmp1 = tempfile.NamedTemporaryFile(dir=".", suffix=file_ext, delete=False)
     with open(tmp1.name, 'wb') as fout:
         fout.write(file_data) 
-
-    if (file_ext == "pdf"):
-        ## convert to markdown
-        tmp2 = tempfile.NamedTemporaryFile(dir=".", suffix=".md", delete=False)
-        md_data = pymupdf4llm.to_markdown(tmp1.name)
-        pathlib.Path(tmp2.name).write_bytes(md_data.encode())
-        md_name = file_name.split(".")[0] + ".md"
-        os.rename(tmp2.name,md_name)
-        add_file("./" + md_name)
-        os.remove(md_name)
-        os.remove(tmp1.name)
-    else:
-        os.rename(tmp1.name,file_name)
-        add_file("./" + file_name)
-        os.remove(file_name)
+    os.rename(tmp1.name,file_name)
+    add_file("./" + file_name)
+    os.remove(file_name)
     
     return {"upload_status": "successful"}
+
+
+@app.post("/upload-and-process-pdf/")
+async def create_upload_file(file: UploadFile):
+    file_name = file.filename
+    file_data = file.file.read()
+    file_ext = file_name.split(".")[-1]
+    tmp1 = tempfile.NamedTemporaryFile(dir=".", suffix=file_ext, delete=False)
+    with open(tmp1.name, 'wb') as fout:
+        fout.write(file_data) 
+
+    if (file_ext == "pdf"):
+        try:
+            ## convert to markdown
+            tmp2 = tempfile.NamedTemporaryFile(dir=".", suffix=".md", delete=False)
+            md_data = pymupdf4llm.to_markdown(tmp1.name)
+            pathlib.Path(tmp2.name).write_bytes(md_data.encode())
+            md_name = file_name.split(".")[0] + ".md"
+            os.rename(tmp2.name,md_name)
+            add_file("./" + md_name)
+            os.remove(md_name)
+            os.remove(tmp1.name)
+        except:
+            return {"error": "File could not be converted"}
+    else:
+        return {"error": "File is not in pdf format"}
 
 '''
 Helper function for create_upload_file
 '''
 def add_file(fp):
     file = {'file': open(fp, 'rb')}
-    response = requests.post('http://localhost:8001/v1/ingest/file', files=file)
+    ## using http.client will require direct setting of the payload, use requests.post instead!
+    response = requests.post('http://' + chat_server + '/v1/ingest/file', files=file)
     
